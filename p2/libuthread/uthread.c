@@ -17,7 +17,7 @@ typedef enum uthread_state {running,
                             ready, 
                             blocked, 
                             zombie
-  }uthread_state;
+}uthread_state;
 
 struct TCB
 {
@@ -32,16 +32,12 @@ int tid_thread = 1;
 struct TCB * current_thread;
 struct TCB * blocked_thread;
 
-
 static queue_t ready_queue = NULL;
 static queue_t blocked_queue = NULL;
-static queue_t zombie_queue;
+static queue_t zombie_queue = NULL;
 
 
-/*
- * Yield for other threads to execute 
- * from the currently active and running thread 
- */
+// yield other threads to execute from the currently active and running thread
 void uthread_yield(void)
 {
   struct TCB * next_thread = NULL;
@@ -49,16 +45,15 @@ void uthread_yield(void)
   
   //If no thread to be excuted, current_thread continue running 
   if (ready_queue == NULL) {
-	  printf("continue with current thread\n");
+    printf("continue with current thread\n");
     return;
   }
   
   //Chage state of running and active current_thread into ready
   //If the current_therad state is blocked or zombie, yield does not happen
-  //if(current_thread->state == running){
-	  
-    current_thread->state = ready;
-  //}
+  if(current_thread->state == running){
+  current_thread->state = ready;
+  }
   
   //Enqueue current_thread into ready_queue
   queue_enqueue(ready_queue,(void*)current_thread);
@@ -76,14 +71,13 @@ void uthread_yield(void)
   //Chage state of next_thread into running
   //Now next_thread state becomes running
   next_thread->state = running;
- 
- current_thread = next_thread;
- 
-  //Switch context between current_thread and next_thread
-  uthread_ctx_switch(&temp->context,&next_thread->context);
   
   //Set next_thread as current_thread(running)
- 
+  current_thread = next_thread;
+  
+  //Switch context between current_thread and next_thread
+  uthread_ctx_switch(&temp->context,&next_thread->context);
+
 } 
 
 //Get the TID of currently running thread
@@ -94,11 +88,11 @@ uthread_t uthread_self(void)
 
 
 /*This function creates a new thread running the function @func to which
- *argument @arg is passed, and returns the TID of this new thread.
- */
+*argument @arg is passed, and returns the TID of this new thread.
+*/
 int uthread_create(uthread_func_t func, void *arg)
 {
-
+  
   struct TCB * new_thread = (struct TCB *)malloc(sizeof(struct TCB));
   
   //return -1 in case of failure of memory allocation
@@ -109,8 +103,8 @@ int uthread_create(uthread_func_t func, void *arg)
   
   // if there is no thread, create main thread
   if( (ready_queue == NULL && zombie_queue == NULL && blocked_queue == NULL)
-       || (tid_thread < 1) ){
-  
+        || (tid_thread < 1) ){
+    
     struct TCB * main_thread = (struct TCB *)malloc(sizeof(struct TCB));
     
     if(!main_thread){
@@ -131,7 +125,6 @@ int uthread_create(uthread_func_t func, void *arg)
     
   }
   
-
   // initialize state and TID of new_thread
   new_thread->state = ready;
   new_thread->TID = tid_thread;
@@ -143,7 +136,6 @@ int uthread_create(uthread_func_t func, void *arg)
     perror("Failure of stack allocation");
     return -1;
   }
-  
   
   // return -1 if it was not properly initialized
   int initialization = uthread_ctx_init(&new_thread->context, &new_thread->stack, func, arg);
@@ -163,6 +155,7 @@ int uthread_create(uthread_func_t func, void *arg)
 void uthread_exit(int retval)
 {
   struct TCB *temp = current_thread;
+  
   //if thread is the main one, free and exit
   if(current_thread->TID == 0){
     queue_destroy(ready_queue);
@@ -175,37 +168,42 @@ void uthread_exit(int retval)
   current_thread->retval = retval;
   current_thread->state = zombie;
   
-  
-  if (zombie_queue == NULL){
+  //If there is no thread in zombie_queue & it's not main thread, create zombie_queue
+  if (zombie_queue == NULL && current_thread->TID !=0){
     zombie_queue = queue_create();
   }
   //Enqueue current_thread into the zombie_queue
   queue_enqueue(zombie_queue,(void*)current_thread);
   
   /* blocked_thread_checker return -1 if @queue or @data are NULL,
-   * or if the queue is empty. 
-   * 0 if @data was set with the oldest item available in @queue.
+  * or if the queue is empty. 
+  * 0 if @data was set with the oldest item available in @queue.
   */
-  if(ready_queue == NULL) {
-	  int blocked_thread_checker = queue_dequeue(blocked_queue,(void*)&blocked_thread);
-		
-	  //if there is any waiting thread,
-	  if(blocked_thread_checker != -1){
-		
-	  //Dequeue blocked_thread(waiting thread) from the blocked_queue
-	  queue_dequeue(blocked_queue,(void*)&blocked_thread);
-	  
-	  //Set the blocked_thread as running current_thread
-	  blocked_thread->state = running;
-		 current_thread = blocked_thread;
-	 uthread_ctx_switch(&temp->context,&blocked_thread->context);
-	}
+  if(queue_length(ready_queue) == 0) {
+    int blocked_thread_checker = queue_dequeue(blocked_queue,(void*)&blocked_thread);
+    
+    //if there is any waiting thread,
+    if(blocked_thread_checker != -1){
+      
+      //Dequeue blocked_thread(waiting thread) from the blocked_queue
+      queue_dequeue(blocked_queue,(void*)&blocked_thread);
+      
+      //Set the blocked_thread as running current_thread
+      blocked_thread->state = running;
+      current_thread = blocked_thread;
+      uthread_ctx_switch(&temp->context,&blocked_thread->context);
+    }
   }
   else {
-	queue_dequeue(ready_queue,(void*)&blocked_thread);
-	blocked_thread->state = running;
-		 current_thread = blocked_thread;
-	 uthread_ctx_switch(&temp->context,&blocked_thread->context);
+    //Dequeue blocked_thread(wating thread) from reeady_queue
+    queue_dequeue(ready_queue,(void*)&blocked_thread);
+  
+  
+    //Chage the state of blocked_thread into running
+    blocked_thread->state = running;
+    //Set the blocked_thread as current_thread
+    current_thread = blocked_thread;
+    uthread_ctx_switch(&temp->context,&blocked_thread->context);
   }
 }
 
@@ -213,119 +211,112 @@ void uthread_exit(int retval)
 int check_tid (void *data, void *arg)
 {
   
-	struct TCB*temp = malloc(sizeof(struct TCB));
-	temp = data;
-	
- 
+  struct TCB * temp = malloc(sizeof(struct TCB));
+  temp = data;
+  
+  int a = (*(uthread_t*)arg);
+  
   // if thread's TID is equal to arg's, return 1
-  if(temp->TID == (*(uthread_t*)arg) )
+  if(temp->TID == a )
   {
     return 1;
   }
   // if not, return 0
-	return 0;
+  return 0;
   
 }
 
 
 int uthread_join(uthread_t tid, int *retval)
 {
-
-struct TCB * thread_to_join = malloc(sizeof(struct TCB));
-struct TCB * thread_to_join1= malloc(sizeof(struct TCB));
-struct TCB * thread_to_join2 = malloc(sizeof(struct TCB));  
+  
+  struct TCB * thread_to_join = malloc(sizeof(struct TCB));
+  struct TCB * thread_to_join1= malloc(sizeof(struct TCB));
+  struct TCB * thread_to_join2 = malloc(sizeof(struct TCB));  
   
   //queue_iterate : return -1 if queue or function are NULL, 0 otherwise
-  
-  
   int ready_check = queue_iterate(ready_queue, check_tid, &tid ,(void*)&thread_to_join);
-
-int zombie_check = queue_iterate(zombie_queue, check_tid, &tid ,(void*)&thread_to_join1);   
-
- int blocked_check = queue_iterate(blocked_queue, check_tid, &tid ,(void*)&thread_to_join2);
-         
-      
+  int zombie_check = queue_iterate(zombie_queue, check_tid, &tid ,(void*)&thread_to_join1);   
+  int blocked_check = queue_iterate(blocked_queue, check_tid, &tid ,(void*)&thread_to_join2);
+  
+  
   //if the thread to join state is active(ready state)
   if (ready_check == 0)
   {
-	  struct TCB *temp = current_thread;
-    
-    //queue_iterate(ready_queue, check_tid, &tid ,(void*)&thread_to_join);
+    struct TCB *temp = current_thread;
     
     if (thread_to_join){
-    //current_thread must be blocked
-    current_thread->state = blocked;
-
-    //Enqueue current_thread into blocked_queue
-    queue_enqueue(blocked_queue, (void*)current_thread);
-    
-    //Remove the oldest item of ready_queue and assign this item to thread_to_join
-    queue_dequeue(ready_queue, (void*)&thread_to_join);
-    
-    //Chage state of the thread_to_join(thread to join) to running 
-    thread_to_join->state = running;
-    
-	current_thread = thread_to_join;
-    
-    //Switch context between current_thread and thread_to_join(thread to join)
-    uthread_ctx_switch(&temp->context,&thread_to_join->context);
-    
-    //Set thread_to_join as current_thread
+      //current_thread must be blocked
+      current_thread->state = blocked;
+      
+      //Enqueue current_thread into blocked_queue
+      queue_enqueue(blocked_queue, (void*)current_thread);
+      
+      //Remove the oldest item of ready_queue and assign this item to thread_to_join
+      queue_dequeue(ready_queue, (void*)&thread_to_join);
+      
+      //Chage state of the thread_to_join(thread to join) to running 
+      thread_to_join->state = running;
+      
+      current_thread = thread_to_join;
+      
+      //Switch context between current_thread and thread_to_join(thread to join)
+      uthread_ctx_switch(&temp->context,&thread_to_join->context);
+      
+      //Set thread_to_join as current_thread
     }
-    return -1;
+    return 0;
   }
   
   //if the thread to join is dead(zombie state),
- if (zombie_check == 0)
+  if (zombie_check == 0)
   {
-    //queue_iterate(zombie_queue, check_tid, &tid ,(void*)&thread_to_join);   
     if (thread_to_join1){
       
-    
-    //Set the return value of thread_to_join(thread to join which is dead)
-    if(retval){
-      *retval = thread_to_join1->retval;
-    }
+      
+      //Set the return value of thread_to_join(thread to join which is dead)
+      if(retval){
+        *retval = thread_to_join1->retval;
+      }
       //Dequeue thread_to_join(thread to join which is on zombie state) from zombie_queue
       queue_dequeue(zombie_queue,(void*)&thread_to_join1);
       //Deallocate stack segment of thread_to_join
       uthread_ctx_destroy_stack(&thread_to_join1->stack);
       //thread_to_join can be finally freed
       free(thread_to_join1);
-	}
+    }
     return 0;
   }
-
+  
   
   //if the thread to join is blocked(waiting)
   if (blocked_check == 0)
   {
-	  struct TCB *temp = current_thread;
-    //queue_iterate(blocked_queue, check_tid, &tid ,(void*)&thread_to_join);
-    
+    struct TCB *temp = current_thread;
+
     if (thread_to_join2)
-	{
+    {
       
-    //current_thread must be blocked
-    current_thread->state = blocked;
-    
-    //Enqueue current_thread into blocked_queue
-    queue_enqueue(blocked_queue, (void*)current_thread);
-    
-    //Remove the oldest item of ready_queue and assign this item to thread_to_join
-    queue_dequeue(ready_queue, (void*)&thread_to_join2);
-    
-    //Chage state of the thread_to_join(thread to join) to running 
-    thread_to_join2->state = running;
-   
- current_thread = thread_to_join2;
+      //current_thread must be blocked
+      current_thread->state = blocked;
       
-    //Switch context between current_thread and thread_to_join(thread to join)
-    uthread_ctx_switch(&temp->context,&thread_to_join2->context);
-    
-    //Set thread_to_join as current_thread
-   
-	}
+      //Enqueue current_thread into blocked_queue
+      queue_enqueue(blocked_queue, (void*)current_thread);
+      
+      //Remove the oldest item of ready_queue and assign this item to thread_to_join
+      queue_dequeue(blocked_queue, (void*)&thread_to_join2);
+      
+      //Chage state of the thread_to_join(thread to join) to running 
+      thread_to_join2->state = running;
+      
+      //Set thread_to_join as current_thread
+      current_thread = thread_to_join2;
+      
+      //Switch context between current_thread and thread_to_join(thread to join)
+      uthread_ctx_switch(&temp->context,&thread_to_join2->context);
+      
+      
+    }
     return 0;
   }
   
